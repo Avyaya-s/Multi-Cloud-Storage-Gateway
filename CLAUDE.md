@@ -18,6 +18,8 @@ and no provider ever holds readable data.
 ## Repository layout
 ```
 gateway/
+  service.py    FileService: upload/download/delete orchestration (pipeline + placer + repo)
+  settings.py   env/.env settings
   api/          routes.py, auth.py
   core/         chunker.py, crypto.py, erasure.py, pipeline.py
   placement/    policy.py, placer.py, scorer.py
@@ -70,9 +72,20 @@ bench/
 - Keep functions small and typed (type hints everywhere).
 
 ## Commands
-- Run tests: `pytest -q`
-- Start stack: `docker compose -f deploy/docker-compose.yml up -d`
-- Run API: `uvicorn gateway.api.routes:app --reload`
+- Virtualenv: `.venv` (Python 3.13); `.venv/Scripts/python -m pip install -r requirements.txt`
+- Run tests: `pytest -q` (integration tests auto-skip when the compose stack is down)
+- Start stack: `docker compose -f deploy/docker-compose.yml --env-file .env up -d`
+- Run API: `uvicorn gateway.api.routes:app --reload` (http://127.0.0.1:8000/docs)
+
+## Local environment notes
+- Ports: Postgres 127.0.0.1:5433 (5432 is taken by a local Postgres service);
+  MinIO API/console: in-1 9010/9011, in-2 9020/9021, abroad 9030/9031, extra 9040/9041.
+- Always use `127.0.0.1`, never `localhost`, in endpoints/URLs: on this Windows machine
+  `localhost` tries IPv6 first and costs 5-20 s per new connection.
+- Official minio/minio images are no longer pullable; compose uses Chainguard's MinIO
+  build pinned by digest. `minio-extra` (compose profile "extra") is only for tests.
+- KEK salt, Argon2id params and a verifier live in the `kek_meta` table; a wrong
+  SS_ADMIN_PASSPHRASE is refused at startup.
 
 
 ## Background documents

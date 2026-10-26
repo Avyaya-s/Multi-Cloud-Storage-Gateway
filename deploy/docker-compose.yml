@@ -1,0 +1,57 @@
+# Local stack: Postgres + 3 MinIO "clouds" (2 labelled India, 1 abroad).
+# Run from the repo root:  docker compose -f deploy/docker-compose.yml --env-file .env up -d
+# The 4th MinIO (profile "extra") is only used by the re-routing integration test.
+#
+# Official minio/minio images are no longer pullable; this is Chainguard's build of the
+# same MinIO server, pinned by digest for reproducibility.
+x-minio: &minio
+  image: cgr.dev/chainguard/minio@sha256:268d68a2a3b6fc65f905a61f84d7eab6345ce6bff14f551e2b028ec31e6a1341
+  command: ["server", "/data", "--console-address", ":9001"]
+  environment:
+    MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+    MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-sovereignstripe}
+    ports: ["127.0.0.1:5433:5432"]  # 5433: avoid clashing with a local Postgres
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  minio-in-1:
+    <<: *minio
+    ports: ["127.0.0.1:9010:9000", "127.0.0.1:9011:9001"]
+    volumes: [minio-in-1:/data]
+
+  minio-in-2:
+    <<: *minio
+    ports: ["127.0.0.1:9020:9000", "127.0.0.1:9021:9001"]
+    volumes: [minio-in-2:/data]
+
+  minio-abroad:
+    <<: *minio
+    ports: ["127.0.0.1:9030:9000", "127.0.0.1:9031:9001"]
+    volumes: [minio-abroad:/data]
+
+  minio-extra:
+    <<: *minio
+    profiles: ["extra"]
+    ports: ["127.0.0.1:9040:9000", "127.0.0.1:9041:9001"]
+    volumes: [minio-extra:/data]
+
+volumes:
+  pgdata:
+  minio-in-1:
+  minio-in-2:
+  minio-abroad:
+  minio-extra:

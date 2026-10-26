@@ -1,0 +1,29 @@
+# Storage providers. Credentials are given as the NAMES of environment variables.
+# Order matters: it is the base order for round-robin shard placement.
+providers:
+  - name: minio-in-1
+    type: s3
+    endpoint: http://127.0.0.1:9010
+    bucket: sovereignstripe
+    jurisdiction: IN
+    cost_per_gb: 0.0
+    access_key_env: MINIO_ROOT_USER
+    secret_key_env: MINIO_ROOT_PASSWORD
+
+  - name: minio-in-2
+    type: s3
+    endpoint: http://127.0.0.1:9020
+    bucket: sovereignstripe
+    jurisdiction: IN
+    cost_per_gb: 0.0
+    access_key_env: MINIO_ROOT_USER
+    secret_key_env: MINIO_ROOT_PASSWORD
+
+  - name: minio-abroad
+    type: s3
+    endpoint: http://127.0.0.1:9030
+    bucket: sovereignstripe
+    jurisdiction: NON_IN
+    cost_per_gb: 0.0
+    access_key_env: MINIO_ROOT_USER
+    secret_key_env: MINIO_ROOT_PASSWORD

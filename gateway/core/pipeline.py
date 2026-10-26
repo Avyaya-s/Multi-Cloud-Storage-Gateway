@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 ShardFetcher = Callable[[int, int], Awaitable[bytes]]
 # on_corrupt(seg_index, shard_index), so callers can mark the shard for repair.
 CorruptCallback = Callable[[int, int], None]
+# rank(seg_index, shard_index): lower is fetched first (e.g. to try known-bad providers last).
+ShardRank = Callable[[int, int], int]
 
 
 class SegmentUnrecoverableError(Exception):
@@ -155,9 +157,10 @@ async def fetch_segment(
     fetch: ShardFetcher,
     k: int = erasure.K,
     m: int = erasure.M,
+    rank: ShardRank | None = None,
 ) -> DecodedSegment:
     """Fetch k shards in parallel; on failure or bad hash, fall back to the remaining ones."""
-    candidates = sorted(meta.shard_sha256)
+    candidates = sorted(meta.shard_sha256, key=lambda i: (rank(meta.seg_index, i) if rank else 0, i))
     valid: dict[int, bytes] = {}
     corrupt: set[int] = set()
     while len(valid) < k and candidates:
@@ -187,6 +190,7 @@ async def decode_file(
     on_corrupt: CorruptCallback | None = None,
     k: int = erasure.K,
     m: int = erasure.M,
+    rank: ShardRank | None = None,
 ) -> AsyncIterator[bytes]:
     """Yield the file's plaintext segment by segment.
 
@@ -200,7 +204,7 @@ async def decode_file(
             raise SegmentUnrecoverableError(
                 f"segment sequence broken at position {position} (got {meta.seg_index})"
             )
-        decoded = await fetch_segment(ctx, meta, position == len(segments) - 1, fetch, k, m)
+        decoded = await fetch_segment(ctx, meta, position == len(segments) - 1, fetch, k, m, rank)
         if on_corrupt:
             for index in sorted(decoded.corrupt):
                 on_corrupt(meta.seg_index, index)
