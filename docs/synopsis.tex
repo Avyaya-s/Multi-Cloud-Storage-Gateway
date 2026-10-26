@@ -1,0 +1,197 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Page setup ----------
+\usepackage[a4paper,top=3.2cm,bottom=2.5cm,left=2.5cm,right=2.5cm,headheight=2cm,headsep=1.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.95]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{microtype}
+
+\setlength{\emergencystretch}{2em}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\renewcommand{\arraystretch}{1.25}
+
+% ---------- Header: logo + college name on every page ----------
+% Keep rvce_header.png (logo + college name) in the same folder as this file.
+% If it's missing, a placeholder box and text are used instead.
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyhead[L]{%
+  \hspace*{-1.6cm}%
+  \IfFileExists{rvce_header.png}%
+    {\includegraphics[height=1.9cm]{rvce_header.png}}%
+    {\raisebox{-0.45\height}{\framebox(45,45){\scriptsize LOGO}}%
+     \hspace{0.3cm}%
+     \begin{tabular}[c]{@{}l@{}}
+       \large RV College of\\
+       \large Engineering\textsuperscript{\textregistered}
+     \end{tabular}}}
+
+\newcommand{\sectionhead}[1]{\vspace{10pt}\textbf{#1}\par}
+
+\begin{document}
+
+% ---------- Title table ----------
+\vspace*{1.2cm}
+\begin{center}
+\small
+\begin{tabular}{|>{\raggedright\arraybackslash}p{3.1cm}|p{1.8cm}|>{\raggedright\arraybackslash}p{3.3cm}|p{2.4cm}|p{3.0cm}|}
+\hline
+\textbf{College} & \multicolumn{4}{l|}{\textbf{RV COLLEGE OF ENGINEERING\textsuperscript{\textregistered}}} \\
+\hline
+\textbf{Department} & \multicolumn{4}{l|}{\textbf{COMPUTER SCIENCE AND ENGINEERING}} \\
+\hline
+\textbf{PROGRAM: BE- CSE} & & \textbf{Cloud Computing- Elective Project Based Learning} & \textbf{Course Code} & \textbf{IS355TBD} \\
+\hline
+\textbf{Student Name1} & \multicolumn{2}{l|}{\textbf{Avyaya S Yekkar}} & \hfill\textbf{USN} & \textbf{1RV24CS057} \\
+\hline
+\textbf{Student Name2} & \multicolumn{2}{l|}{\textbf{Varad Bidada}} & \hfill\textbf{USN} & \textbf{1RV24CS062} \\
+\hline
+\textbf{Student Name3} & \multicolumn{2}{l|}{\textbf{Ankitha R}} & \hfill\textbf{USN} & \textbf{1RV25CS405} \\
+\hline
+\textbf{Student Name4} & \multicolumn{2}{l|}{\textbf{Akshatha K}} & \hfill\textbf{USN} & \textbf{1RV25CS404} \\
+\hline
+\textbf{Project Title} & \multicolumn{4}{p{11.3cm}|}{\textbf{SovereignStripe: Multi-Cloud Striped Storage Gateway}} \\
+\hline
+\textbf{Date of Submission} & \multicolumn{4}{l|}{\textbf{29/09/2026}} \\
+\hline
+\textbf{Under taken at} & \multicolumn{4}{l|}{\textbf{RV College of Engineering}} \\
+\hline
+\end{tabular}
+\end{center}
+
+\vspace{1.2cm}
+
+% ---------- Introduction ----------
+\sectionhead{Introduction:}
+
+Most organisations store their data with a single cloud provider, which exposes them to three
+well-documented risks: provider outages that make data unreachable, vendor lock-in that makes migration
+slow and costly, and the need to trust the provider, and anyone who breaches it, with readable data.
+Keeping full copies with several providers improves availability, but triples storage cost and does
+nothing for confidentiality. Data-protection regulation such as India's Digital Personal Data Protection
+(DPDP) Act adds a further requirement that sensitive data remain under domestic jurisdiction.
+
+This project designs, implements and evaluates a multi-cloud storage gateway that addresses these risks.
+Every file is encrypted on the client side using envelope encryption (AES-256-GCM), each encrypted
+segment is split into data and parity shards using Reed--Solomon erasure coding, and the shards are
+distributed across independent cloud providers so that any single provider can fail without data loss or
+disclosure. As an extension, the project explores placement policies that keep sensitive files
+recoverable within India and that move shards away from degrading providers before an outage occurs.
+
+\newpage
+
+% ---------- Objectives ----------
+\sectionhead{Objectives:}
+
+\begin{itemize}[leftmargin=*,label=\textbullet,itemsep=4pt]
+  \item \textbf{Secure storage:} implement client-side envelope encryption, with a per-file data key
+        wrapped by a master key and authenticated, segment-wise AES-256-GCM encryption.
+  \item \textbf{Fault tolerance:} apply Reed--Solomon RS(4,2) erasure coding and distribute shards across
+        independent providers (self-hosted MinIO, Cloudflare R2, Google Drive), so the system survives the
+        loss of any one provider at 1.5$\times$ storage overhead instead of 3$\times$ for replication.
+  \item \textbf{Self-healing:} detect missing or corrupted shards and automatically rebuild them from the
+        remaining shards.
+  \item \textbf{Policy-based placement:} explore placement policies that keep sensitive files recoverable
+        within India and that proactively move shards away from unhealthy providers.
+  \item \textbf{Evaluation:} measure the system's performance, fault tolerance, repair time and storage
+        cost, and compare erasure coding with full replication.
+\end{itemize}
+
+% ---------- Methodology ----------
+\sectionhead{Methodology:}
+
+The system is built as a gateway service (Python/FastAPI) in front of multiple object-storage providers
+and deployed with Docker Compose. It is developed in the following steps:
+
+\begin{enumerate}[leftmargin=*,label=\textbf{Step \arabic*:},itemsep=4pt]
+  \item \textbf{Segmentation.} The uploaded file is split into fixed 4\,MB segments so that large files
+        are processed piece by piece.
+  \item \textbf{Encryption.} A random 256-bit data encryption key (DEK) is generated per file. Each
+        segment is encrypted with AES-256-GCM, using a counter-derived nonce and associated data that bind
+        it to its file, position and final-segment flag, preventing reordering and truncation.
+  \item \textbf{Key protection.} The DEK is wrapped with a key encryption key (KEK) derived from an admin
+        passphrase using Argon2id, and only the wrapped DEK is stored.
+  \item \textbf{Erasure coding.} Each encrypted segment is Reed--Solomon coded into 4 data shards and 2
+        parity shards. Every shard receives a SHA-256 fingerprint and a random object name.
+  \item \textbf{Placement and upload.} Shards are assigned to providers with at most $m$ shards of a
+        segment per provider, then uploaded in parallel. A PostgreSQL metadata store records the shard
+        map with pending/committed status so interrupted uploads can be cleaned up.
+  \item \textbf{Download.} Any $k$ healthy shards are fetched, their hashes verified, and the segment is
+        erasure-decoded and decrypted with authentication-tag verification.
+  \item \textbf{Health monitoring and repair.} Each provider is scored on latency, success rate and cost,
+        with a circuit breaker for failing providers. Background workers verify shard integrity, rebuild
+        missing or corrupted shards, and clean up leftover objects.
+  \item \textbf{Placement policies (extension).} Residency-aware policies (\emph{india\_only},
+        \emph{recoverable\_in\_india}, \emph{any}) and health-driven migration of shards off degrading
+        providers are added on top of the core system.
+  \item \textbf{Evaluation.} Provider regions are modelled as labelled storage endpoints, and Toxiproxy
+        injects latency and outages into individual providers. Throughput, p50/p95/p99 latency, success
+        rate under provider failure, time-to-repair, storage overhead and projected cost are measured,
+        comparing erasure coding against full replication and static against adaptive placement.
+        Results are presented as comparison graphs with a findings section.
+\end{enumerate}
+
+% ---------- Data set ----------
+\sectionhead{Data set used:}
+
+\begin{itemize}[leftmargin=*,label=\textbullet,itemsep=4pt]
+  \item No external or public dataset is used.
+  \item A synthetic workload of files of varying sizes (1\,MB to 500\,MB) and types, tagged with
+        different sensitivity levels, is generated and uploaded through the gateway.
+  \item Scripted fault-injection scenarios: complete provider outage, injected latency, shard deletion
+        and byte-level shard corruption.
+  \item The same scenarios are replayed for each configuration (static vs.\ adaptive placement;
+        RS(4,2) vs.\ RS(4,1) vs.\ 3$\times$ replication) for an apples-to-apples comparison.
+\end{itemize}
+
+% ---------- Software requirements ----------
+\sectionhead{Software Requirements:}
+
+\begin{itemize}[leftmargin=*,label=\textbullet,itemsep=4pt]
+  \item Gateway and APIs: Python, FastAPI, asyncio
+  \item Cryptography: cryptography (AES-256-GCM), argon2-cffi (Argon2id key derivation)
+  \item Erasure coding: zfec (Reed--Solomon)
+  \item Storage providers: MinIO (self-hosted), Cloudflare R2, Google Drive API; aioboto3 for S3-compatible access
+  \item Metadata store: PostgreSQL with SQLAlchemy
+  \item Background scheduling: APScheduler
+  \item Fault injection: Toxiproxy
+  \item Frontend dashboard: React (Vite) with Recharts
+  \item Monitoring and benchmarking: Prometheus client, Locust, pytest and Hypothesis
+  \item Containerization and orchestration: Docker, Docker Compose
+  \item Version control: Git/GitHub
+\end{itemize}
+
+% ---------- Contribution to the field ----------
+\sectionhead{Contribution to the field:}
+
+\begin{itemize}[leftmargin=*,label=\textbullet,itemsep=4pt]
+  \item Multi-cloud erasure-coded storage is an established research area, with systems such as RACS,
+        DepSky, Tahoe-LAFS and Storj demonstrating that striping encrypted data across providers improves
+        availability and confidentiality.
+  \item This project provides a lightweight, open, working implementation of these ideas over everyday
+        public clouds and self-hosted storage, built from standard components (AES-256-GCM, Argon2id,
+        Reed--Solomon coding).
+  \item It offers a controlled, reproducible empirical comparison of erasure coding against full
+        replication in terms of availability, latency, repair time, storage overhead and cost.
+  \item It demonstrates end-to-end fault tolerance and self-healing under realistic failures, including
+        complete provider outages, added latency, and deleted or corrupted shards.
+  \item It serves as a practical platform for studying data-placement policies, including residency-aware
+        placement relevant to India's DPDP Act and health-driven migration of shards between providers.
+\end{itemize}
+
+\vspace{1cm}
+\begin{center}
+\textbf{Staff In charge:}\\
+\textbf{Dr Nagaraja G.S}\\
+\textbf{Professor and Associate Dean, RVCE}\\
+\textbf{Bengaluru-560059}
+\end{center}
+
+\end{document}

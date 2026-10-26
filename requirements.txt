@@ -1,0 +1,27 @@
+# Gateway / API
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# Crypto
+cryptography>=42.0
+argon2-cffi>=23.1
+
+# Erasure coding
+zfec>=1.5.7
+
+# Storage providers
+aioboto3>=12.0
+
+# Metadata
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29
+aiosqlite>=0.20
+
+# Workers
+apscheduler>=3.10
+
+# Tests
+pytest>=8.0
+pytest-asyncio>=0.23
+hypothesis>=6.100
