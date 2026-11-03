@@ -70,6 +70,8 @@ bench/
 - Secrets come from environment variables / `.env` (never committed).
 - Every core module gets unit tests; crypto and erasure code get property-based tests.
 - Keep functions small and typed (type hints everywhere).
+- Git: no `Co-Authored-By` trailers (or any AI attribution) in commit messages.
+  Never push; the user pushes themselves.
 
 ## Commands
 - Virtualenv: `.venv` (Python 3.13); `.venv/Scripts/python -m pip install -r requirements.txt`
