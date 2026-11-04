@@ -5,15 +5,18 @@ No authentication yet (JWT comes with api/auth.py): bind to localhost only.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import Any
 from urllib.parse import quote
 
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from gateway.db.models import File
@@ -27,7 +30,7 @@ from gateway.service import (
     UploadFailedError,
     unlock_kek,
 )
-from gateway.settings import Settings
+from gateway.settings import REPO_ROOT, Settings
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +69,27 @@ class SegmentOut(BaseModel):
 class PlacementOut(BaseModel):
     file_id: uuid.UUID
     segments: list[SegmentOut]
+
+
+class EventOut(BaseModel):
+    id: int
+    ts: datetime
+    type: str
+    details: dict[str, Any]
+
+
+class ProviderOut(BaseModel):
+    name: str
+    type: str
+    jurisdiction: str
+    endpoint: str
+    up: bool
+    latency_ms: float | None
+    shards: dict[str, int]  # shard status -> count
+
+
+PROBE_TIMEOUT_S = 3.0
+DASHBOARD_DIST = REPO_ROOT / "dashboard" / "dist"
 
 
 def create_app(settings: Settings | None = None, registry: ProviderRegistry | None = None) -> FastAPI:
@@ -154,6 +178,42 @@ def create_app(settings: Settings | None = None, registry: ProviderRegistry | No
             raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found") from err
         background.add_task(svc().purge, file_id)
         return {"id": str(file_id), "status": "DELETED"}
+
+    @app.get("/events", response_model=list[EventOut])
+    async def list_events(limit: int = Query(50, ge=1, le=500)) -> list[EventOut]:
+        """Most recent first."""
+        return [
+            EventOut(id=e.id, ts=e.ts, type=e.type, details=e.details_json)
+            for e in await svc().repo.recent_events(limit)
+        ]
+
+    @app.get("/providers", response_model=list[ProviderOut])
+    async def list_providers() -> list[ProviderOut]:
+        """Each provider's live reachability (one probe now) and how many shards it holds."""
+        registry = svc().registry
+        counts = await svc().repo.shard_counts()
+
+        async def probe(name: str) -> float | None:
+            try:
+                return await asyncio.wait_for(registry[name].probe(), PROBE_TIMEOUT_S)
+            except Exception:  # down, unreachable or timed out
+                return None
+
+        latencies = await asyncio.gather(*(probe(c.name) for c in registry.configs))
+        return [
+            ProviderOut(
+                name=c.name, type=c.type, jurisdiction=c.jurisdiction, endpoint=c.endpoint,
+                up=ms is not None, latency_ms=ms, shards=counts.get(c.name, {}),
+            )
+            for c, ms in zip(registry.configs, latencies)
+        ]
+
+    if DASHBOARD_DIST.is_dir():  # built with `npm run build` in dashboard/
+        app.mount("/ui", StaticFiles(directory=DASHBOARD_DIST, html=True), name="ui")
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse("/ui/" if DASHBOARD_DIST.is_dir() else "/docs")
 
     return app
 

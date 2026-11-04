@@ -38,3 +38,32 @@ async def test_endpoints_end_to_end(tmp_path: Path) -> None:
             assert (await c.get(f"/files/{fid}/download")).status_code == 404
             assert (await c.get("/files")).json() == []
             assert (await c.get(f"/files/{os.urandom(16).hex()}")).status_code == 404
+
+
+async def test_dashboard_endpoints(tmp_path: Path) -> None:
+    settings = Settings(f"sqlite+aiosqlite:///{tmp_path / 'm.db'}", Path("unused"), "pw", FAST_KDF)
+    reg = memory_registry("in-1", "in-2", "abroad")
+    app = create_app(settings, reg)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            await c.post("/files", files={"file": ("a.txt", b"hello")})
+            reg["abroad"].down = True  # type: ignore[attr-defined]
+
+            providers = {p["name"]: p for p in (await c.get("/providers")).json()}
+            assert list(providers) == ["in-1", "in-2", "abroad"]
+            assert providers["in-1"]["up"] and providers["in-1"]["latency_ms"] is not None
+            assert not providers["abroad"]["up"] and providers["abroad"]["latency_ms"] is None
+            assert providers["abroad"]["jurisdiction"] == "NON_IN"
+            assert all(p["shards"] == {"STORED": 2} for p in providers.values())
+
+            # A deleted file whose shards could not all be purged is GC work, not live data.
+            fid = (await c.get("/files")).json()[0]["id"]
+            await c.delete(f"/files/{fid}")
+            providers = {p["name"]: p for p in (await c.get("/providers")).json()}
+            assert all(p["shards"] == {} for p in providers.values())
+
+            events = (await c.get("/events", params={"limit": 5})).json()
+            assert [e["type"] for e in events] == ["DELETE", "UPLOAD"]  # newest first
+            assert events[1]["details"] == {"file_id": fid, "status": "ACTIVE"}
+            assert (await c.get("/events", params={"limit": 0})).status_code == 422

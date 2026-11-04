@@ -78,6 +78,10 @@ bench/
 - Run tests: `pytest -q` (integration tests auto-skip when the compose stack is down)
 - Start stack: `docker compose -f deploy/docker-compose.yml --env-file .env up -d`
 - Run API: `uvicorn gateway.api.routes:app --reload` (http://127.0.0.1:8000/docs)
+- Dashboard (React + Vite + Recharts, in `dashboard/`): `npm install` once, then
+  `npm run build` -> served by the gateway at http://127.0.0.1:8000/ui/ ; or
+  `npm run dev` -> http://127.0.0.1:5173/ui/ with hot reload (proxies the API to :8000).
+  It only reads `/files`, `/files/{id}/placement`, `/providers`, `/events` and calls upload/download/delete.
 
 ## Local environment notes
 - Ports: Postgres 127.0.0.1:5433 (5432 is taken by a local Postgres service);

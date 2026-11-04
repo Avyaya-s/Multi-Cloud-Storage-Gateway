@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 
@@ -221,6 +221,31 @@ class Repo:
     async def add_event(self, type_: str, details: dict[str, Any]) -> None:
         async with self.session() as s, s.begin():
             s.add(Event(type=type_, details_json=details))
+
+    async def recent_events(self, limit: int) -> list[Event]:
+        async with self.session() as s:
+            return list((await s.scalars(select(Event).order_by(Event.id.desc()).limit(limit))).all())
+
+    async def shard_counts(self) -> dict[str, dict[str, int]]:
+        """provider -> shard status -> count, for live (ACTIVE/DEGRADED) files only.
+
+        Rows left by deleted or rolled-back files are garbage-collector work, not data.
+        """
+        async with self.session() as s:
+            rows = await s.execute(
+                select(Shard.provider_id, Shard.status, func.count())
+                .join(Segment)
+                .join(File)
+                .where(
+                    Shard.provider_id.is_not(None),
+                    File.status.in_([FileStatus.ACTIVE, FileStatus.DEGRADED]),
+                )
+                .group_by(Shard.provider_id, Shard.status)
+            )
+            out: dict[str, dict[str, int]] = {}
+            for provider, status, n in rows.all():
+                out.setdefault(provider, {})[status.value] = n
+            return out
 
     async def events(self, type_: str | None = None) -> list[Event]:
         stmt = select(Event).order_by(Event.id)
