@@ -95,21 +95,24 @@ class Placer:
         self.backoff_s = backoff_s
         self._sem = asyncio.Semaphore(concurrency)
 
-    async def _put(self, provider: str, shard: EncodedShard) -> bool:
+    async def put_object(self, provider: str, key: str, data: bytes, label: str = "") -> bool:
         """Put with retries and exponential backoff; True on success."""
         for attempt in range(self.attempts):
             try:
                 async with self._sem:
-                    await self._providers[provider].put(shard.object_key, shard.data)
+                    await self._providers[provider].put(key, data)
                 return True
             except Exception as err:  # any provider failure; cancellation still propagates
                 log.warning(
-                    "put failed provider=%s shard=%d attempt=%d/%d error=%s",
-                    provider, shard.index, attempt + 1, self.attempts, type(err).__name__,
+                    "put failed provider=%s %s attempt=%d/%d error=%s",
+                    provider, label, attempt + 1, self.attempts, type(err).__name__,
                 )
                 if attempt + 1 < self.attempts:
                     await asyncio.sleep(self.backoff_s * 2**attempt)
         return False
+
+    async def _put(self, provider: str, shard: EncodedShard) -> bool:
+        return await self.put_object(provider, shard.object_key, shard.data, f"shard={shard.index}")
 
     async def execute(
         self,

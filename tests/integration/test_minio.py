@@ -92,3 +92,28 @@ async def test_c_four_providers_failing_shard_is_rerouted(gateway, extra_minio) 
 
     r = await client.get(f"/files/{meta['id']}/download")
     assert r.status_code == 200 and r.content == data
+
+
+async def test_d_scrubber_rebuilds_a_cloud_that_lost_everything(gateway) -> None:
+    client, registry = await gateway(THREE)
+    data = os.urandom(9 * MIB)
+    meta = (await client.post("/files", files={"file": ("s.bin", data)})).json()
+    abroad = registry["minio-abroad"]
+
+    # The cloud comes back empty (disk replaced, account reset): every shard on it is gone.
+    s3 = abroad._client  # type: ignore[attr-defined]
+    listing = await s3.list_objects_v2(Bucket=abroad.bucket)
+    for obj in listing["Contents"]:
+        await s3.delete_object(Bucket=abroad.bucket, Key=obj["Key"])
+
+    report = (await client.post("/admin/scrub")).json()
+    assert report["missing_found"] == 6 and report["repaired"] == 6 and report["unrepaired"] == 0
+
+    # Prove the rebuilt shards are real: lose a DIFFERENT cloud, so the download needs them.
+    compose("stop", "minio-in-1")
+    try:
+        r = await client.get(f"/files/{meta['id']}/download")
+        assert r.status_code == 200 and r.content == data
+    finally:
+        compose("start", "minio-in-1")
+        await wait_ready("minio-in-1")

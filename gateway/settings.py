@@ -19,6 +19,8 @@ class Settings:
     providers_config: Path
     admin_passphrase: str = field(repr=False)
     kdf: KdfParams = KdfParams()
+    scrub_interval_s: int = 0  # quick scrub (HEAD every shard); 0 = off
+    deep_scrub_interval_s: int = 0  # deep scrub (download + SHA-256 every shard); 0 = off
 
     @classmethod
     def from_env(cls, env_file: Path | None = REPO_ROOT / ".env") -> Settings:
@@ -33,4 +35,6 @@ class Settings:
                 os.environ.get("PROVIDERS_CONFIG", REPO_ROOT / "gateway/config/providers.yaml")
             ),
             admin_passphrase=passphrase,
+            scrub_interval_s=int(os.environ.get("SCRUB_INTERVAL_S", "300")),
+            deep_scrub_interval_s=int(os.environ.get("DEEP_SCRUB_INTERVAL_S", "3600")),
         )

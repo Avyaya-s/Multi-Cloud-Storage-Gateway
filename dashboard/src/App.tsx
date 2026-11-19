@@ -61,6 +61,26 @@ export default function App() {
     }
   }, []);
 
+  const [scrubbing, setScrubbing] = useState(false);
+  const [scrubMsg, setScrubMsg] = useState<string | null>(null);
+
+  const scrub = async (deep: boolean) => {
+    setScrubbing(true);
+    setScrubMsg(null);
+    try {
+      const r = await api.scrub(deep);
+      setScrubMsg(
+        `${r.repaired} repaired, ${r.missing_found} missing, ${r.corrupt_found} corrupt` +
+          (r.unrepaired ? `, ${r.unrepaired} could not be repaired` : ""),
+      );
+      refresh();
+    } catch (err) {
+      setScrubMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setScrubbing(false);
+    }
+  };
+
   usePoll(refresh, FAST_MS);
   usePoll(refreshProviders, PROVIDERS_MS);
 
@@ -82,6 +102,17 @@ export default function App() {
           <p className="sub">Encrypted, erasure-coded storage across {providers.length || "several"} clouds</p>
         </div>
         <div className="header-stats">
+          <div className="scrub">
+            <button type="button" className="ghost" disabled={scrubbing || !online} onClick={() => scrub(false)}
+              title="HEAD every shard and rebuild missing ones">
+              {scrubbing ? "Scrubbing…" : "Quick scrub"}
+            </button>
+            <button type="button" className="ghost" disabled={scrubbing || !online} onClick={() => scrub(true)}
+              title="Download and SHA-256 every shard; rebuild missing or corrupt ones">
+              Deep scrub
+            </button>
+            {scrubMsg && <span className="scrub-result">{scrubMsg}</span>}
+          </div>
           {providers.length > 0 && (
             <span className={`pill ${up === providers.length ? "ok" : "bad"}`}>
               {up}/{providers.length} clouds up

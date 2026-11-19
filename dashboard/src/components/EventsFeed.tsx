@@ -28,6 +28,17 @@ export function EventsFeed({ events, fileNames }: Props) {
       }
       case "DELETE":
         return `${name(d.file_id)} deleted`;
+      case "REPAIR":
+        return `${name(d.file_id)} seg ${d.seg_index}/shard ${d.shard_index} rebuilt on ${d.provider}`;
+      case "REPAIR_FAILED":
+        return `${name(d.file_id)} seg ${d.seg_index} could not be repaired` +
+          (d.reason ? ` (${d.reason})` : ` (${d.readable} readable shards, need ${d.need})`);
+      case "FILE_HEALED":
+        return `${name(d.file_id)} is back to 6/6 shards (ACTIVE)`;
+      case "SCRUB":
+        return `${d.deep ? "Deep" : "Quick"} scrub: ${d.files} files, ${d.shards_checked} shards checked, ` +
+          `${d.missing_found} missing, ${d.corrupt_found} corrupt, ${d.repaired} repaired` +
+          (Number(d.unreachable) ? `, ${d.unreachable} on unreachable clouds` : "") + ` (${d.duration_s}s)`;
       default:
         return JSON.stringify(d);
     }

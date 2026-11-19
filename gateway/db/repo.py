@@ -18,6 +18,7 @@ from gateway.db.models import (
     File,
     FileStatus,
     KekMeta,
+    Orphan,
     Provider,
     Segment,
     Shard,
@@ -157,6 +158,16 @@ class Repo:
         async with self.session() as s:
             return list((await s.scalars(stmt)).all())
 
+    async def live_files(self) -> list[File]:
+        """Files the scrubber looks after: ACTIVE and DEGRADED."""
+        stmt = (
+            select(File)
+            .where(File.status.in_([FileStatus.ACTIVE, FileStatus.DEGRADED]))
+            .order_by(File.created_at)
+        )
+        async with self.session() as s:
+            return list((await s.scalars(stmt)).all())
+
     async def get_placement(self, file_id: uuid.UUID) -> list[Segment]:
         async with self.session() as s:
             stmt = (
@@ -200,6 +211,31 @@ class Repo:
                     .where(Shard.segment_id == self._segment_id(file_id, seg_index), Shard.shard_index == shard_index)
                     .values(status=ShardStatus.CORRUPT)
                 )
+
+    async def set_shard_statuses(self, updates: Mapping[int, ShardStatus]) -> None:
+        """{shard row id: new status}."""
+        if not updates:
+            return
+        async with self.session() as s, s.begin():
+            for shard_id, status in updates.items():
+                await s.execute(update(Shard).where(Shard.id == shard_id).values(status=status))
+
+    async def repoint_shard(self, shard_id: int, provider: str, object_key: str, status: ShardStatus) -> None:
+        """Move a shard row to a new location (record the old one as an orphan first)."""
+        async with self.session() as s, s.begin():
+            await s.execute(
+                update(Shard)
+                .where(Shard.id == shard_id)
+                .values(provider_id=provider, object_key=object_key, status=status)
+            )
+
+    async def add_orphans(self, locations: Iterable[tuple[str, str]], reason: str) -> None:
+        async with self.session() as s, s.begin():
+            s.add_all(Orphan(provider_id=p, object_key=k, reason=reason) for p, k in locations)
+
+    async def orphans(self) -> list[Orphan]:
+        async with self.session() as s:
+            return list((await s.scalars(select(Orphan).order_by(Orphan.id))).all())
 
     async def set_file_status(self, file_id: uuid.UUID, status: FileStatus) -> None:
         async with self.session() as s, s.begin():

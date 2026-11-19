@@ -58,6 +58,13 @@ bench/
 - On download: fetch k shards in parallel, verify SHA-256, decode, then decrypt (tag check).
   A failed fetch, failed hash or InvalidTag = treat shard as missing, fall back to the
   remaining shards, log CORRUPT for hash/tag failures.
+- Scrubber (gateway/workers/scrubber.py): quick = HEAD each STORED shard, deep = download +
+  SHA-256. Rebuilds MISSING/CORRUPT shards WITHOUT any key (RS decode of verified shards ->
+  re-encode -> rebuilt shard must match its stored SHA-256), same provider first, else any
+  provider under the cap. An unreachable provider is NOT data loss (its shards are left alone).
+  Before re-pointing a shard row elsewhere, the old location is written to `orphans` (for the GC).
+  DEGRADED -> ACTIVE when every shard is STORED again. Runs on APScheduler (SCRUB_INTERVAL_S,
+  DEEP_SCRUB_INTERVAL_S) and via POST /admin/scrub?deep=.
 - Hedged reads are NOT core: optional setting HEDGED_READS (default false), added later
   for benchmarking.
 - Extension (only after core works): residency policies (india_only,
@@ -93,6 +100,10 @@ bench/
 - KEK salt, Argon2id params and a verifier live in the `kek_meta` table; a wrong
   SS_ADMIN_PASSPHRASE is refused at startup.
 
+
+## Problems log
+docs/problems-log.md records real problems (symptom, cause, fix, lesson). The faculty asked us
+to face and document problems; add an entry whenever something breaks or forces a design change.
 
 ## Background documents
 - docs/synopsis.tex: submitted synopsis (objectives, methodology)

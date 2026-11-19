@@ -21,7 +21,7 @@ asyncpg>=0.29
 aiosqlite>=0.20
 
 # Workers
-apscheduler>=3.10
+apscheduler>=3.10,<4
 
 # Tests
 pytest>=8.0

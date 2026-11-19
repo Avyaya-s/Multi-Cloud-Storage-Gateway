@@ -123,6 +123,22 @@ class Shard(Base):
     segment: Mapped[Segment] = relationship(back_populates="shards")
 
 
+class Orphan(Base):
+    """An object that may still exist on a provider but no shard row points to it any more.
+
+    Written BEFORE a shard row is re-pointed elsewhere (write-ahead), so nothing is ever
+    stored in a cloud without a record; the garbage collector deletes these.
+    """
+
+    __tablename__ = "orphans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider_id: Mapped[str] = mapped_column(ForeignKey("providers.id"), index=True)
+    object_key: Mapped[str] = mapped_column(String(64))
+    reason: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Event(Base):
     __tablename__ = "events"
 

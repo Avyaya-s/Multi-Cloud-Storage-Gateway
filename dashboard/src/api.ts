@@ -49,6 +49,19 @@ export interface GatewayEvent {
   details: Record<string, unknown>;
 }
 
+export interface ScrubReport {
+  deep: boolean;
+  files: number;
+  shards_checked: number;
+  missing_found: number;
+  corrupt_found: number;
+  unreachable: number;
+  repaired: number;
+  unrepaired: number;
+  healed_files: string[];
+  duration_s: number;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -76,6 +89,12 @@ export const api = {
   providers: () => getJson<Provider[]>("/providers"),
   events: (limit = 40) => getJson<GatewayEvent[]>(`/events?limit=${limit}`),
   downloadUrl: (id: string) => `/files/${id}/download`,
+
+  async scrub(deep: boolean): Promise<ScrubReport> {
+    const r = await fetch(`/admin/scrub?deep=${deep}`, { method: "POST" });
+    if (!r.ok) throw new ApiError(r.status, await detail(r));
+    return r.json() as Promise<ScrubReport>;
+  },
 
   async remove(id: string): Promise<void> {
     const r = await fetch(`/files/${id}`, { method: "DELETE" });

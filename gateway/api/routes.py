@@ -10,10 +10,12 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +33,7 @@ from gateway.service import (
     unlock_kek,
 )
 from gateway.settings import REPO_ROOT, Settings
+from gateway.workers.scrubber import Scrubber, ScrubBusyError
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +91,41 @@ class ProviderOut(BaseModel):
     shards: dict[str, int]  # shard status -> count
 
 
+class ScrubOut(BaseModel):
+    deep: bool
+    files: int
+    shards_checked: int
+    missing_found: int
+    corrupt_found: int
+    unreachable: int
+    repaired: int
+    unrepaired: int
+    healed_files: list[str]
+    duration_s: float
+
+
+def _start_scheduler(scrubber: Scrubber, cfg: Settings) -> AsyncIOScheduler:
+    """Background scrubs; a run that overlaps another is skipped, not queued."""
+    scheduler = AsyncIOScheduler()
+
+    async def job(deep: bool) -> None:
+        try:
+            await scrubber.run(deep=deep)
+        except ScrubBusyError:
+            log.info("scheduled scrub skipped: another scrub is running")
+        except Exception:
+            log.exception("scheduled scrub failed")
+
+    for seconds, deep in ((cfg.scrub_interval_s, False), (cfg.deep_scrub_interval_s, True)):
+        if seconds > 0:
+            scheduler.add_job(
+                job, "interval", seconds=seconds, kwargs={"deep": deep},
+                id=f"scrub-{'deep' if deep else 'quick'}", max_instances=1, coalesce=True,
+            )
+    scheduler.start()
+    return scheduler
+
+
 PROBE_TIMEOUT_S = 3.0
 DASHBOARD_DIST = REPO_ROOT / "dashboard" / "dist"
 
@@ -105,10 +143,14 @@ def create_app(settings: Settings | None = None, registry: ProviderRegistry | No
         await repo.sync_providers(reg.configs)
         kek = await unlock_kek(repo, cfg.admin_passphrase, cfg.kdf)
         await reg.open_all()
-        app.state.service = FileService(repo, reg, Placer(reg), kek)
+        placer = Placer(reg)
+        app.state.service = FileService(repo, reg, placer, kek)
+        app.state.scrubber = Scrubber(repo, reg, placer)
+        scheduler = _start_scheduler(app.state.scrubber, cfg)
         try:
             yield
         finally:
+            scheduler.shutdown(wait=False)
             await reg.close_all()
             await engine.dispose()
 
@@ -207,6 +249,19 @@ def create_app(settings: Settings | None = None, registry: ProviderRegistry | No
             )
             for c, ms in zip(registry.configs, latencies)
         ]
+
+    @app.post("/admin/scrub", response_model=ScrubOut)
+    async def scrub(deep: bool = False) -> ScrubOut:
+        """Check every live file's shards now and rebuild missing/corrupt ones.
+
+        deep=false: HEAD each shard (fast). deep=true: download and SHA-256 each shard.
+        No authentication yet (JWT comes later): the API listens on 127.0.0.1 only.
+        """
+        try:
+            report = await app.state.scrubber.run(deep=deep)
+        except ScrubBusyError as err:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(err)) from err
+        return ScrubOut(**asdict(report))
 
     if DASHBOARD_DIST.is_dir():  # built with `npm run build` in dashboard/
         app.mount("/ui", StaticFiles(directory=DASHBOARD_DIST, html=True), name="ui")

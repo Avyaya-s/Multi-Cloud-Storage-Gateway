@@ -16,6 +16,7 @@ export default defineConfig({
       "/files": GATEWAY,
       "/events": GATEWAY,
       "/providers": GATEWAY,
+      "/admin": GATEWAY,
       "/docs": GATEWAY,
       "/openapi.json": GATEWAY,
     },
