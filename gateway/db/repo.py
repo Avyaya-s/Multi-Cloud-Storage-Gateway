@@ -129,13 +129,16 @@ class Repo:
 
     async def finalize_file(
         self, file_id: uuid.UUID, status: FileStatus, size: int, segment_count: int, content_hmac: str
-    ) -> None:
+    ) -> bool:
+        """PENDING -> ACTIVE/DEGRADED. False if the file is no longer PENDING (e.g. the
+        garbage collector gave up on it as a stale upload), so it is never resurrected."""
         async with self.session() as s, s.begin():
-            await s.execute(
+            result = await s.execute(
                 update(File)
-                .where(File.id == file_id)
+                .where(File.id == file_id, File.status == FileStatus.PENDING)
                 .values(status=status, size=size, segment_count=segment_count, content_hmac=content_hmac)
             )
+            return result.rowcount == 1
 
     @staticmethod
     def _segment_id(file_id: uuid.UUID, seg_index: int) -> Any:
@@ -237,16 +240,39 @@ class Repo:
         async with self.session() as s:
             return list((await s.scalars(select(Orphan).order_by(Orphan.id))).all())
 
+    async def remove_orphans(self, ids: Iterable[int]) -> None:
+        ids = list(ids)
+        if ids:
+            async with self.session() as s, s.begin():
+                await s.execute(delete(Orphan).where(Orphan.id.in_(ids)))
+
+    async def files_with_status(self, *statuses: FileStatus) -> list[File]:
+        async with self.session() as s:
+            return list((await s.scalars(select(File).where(File.status.in_(statuses)))).all())
+
+    async def known_keys(self, provider: str) -> set[str]:
+        """Every object key on `provider` that metadata knows about (shards and orphans)."""
+        async with self.session() as s:
+            shard_keys = await s.scalars(select(Shard.object_key).where(Shard.provider_id == provider))
+            orphan_keys = await s.scalars(select(Orphan.object_key).where(Orphan.provider_id == provider))
+            return set(shard_keys.all()) | set(orphan_keys.all())
+
     async def set_file_status(self, file_id: uuid.UUID, status: FileStatus) -> None:
         async with self.session() as s, s.begin():
             await s.execute(update(File).where(File.id == file_id).values(status=status))
 
     async def forget_shards(self, file_id: uuid.UUID, removed: Iterable[tuple[str, str]]) -> None:
-        """Drop rows for objects confirmed deleted; drop the file once nothing is left."""
+        """Drop rows for objects confirmed deleted; drop the file once nothing is left.
+
+        Rows that never had a provider (no cloud had room) point at nothing and go too,
+        otherwise they would keep a dead file's row alive forever.
+        """
         keys = [k for _, k in removed]
         async with self.session() as s, s.begin():
             if keys:
                 await s.execute(delete(Shard).where(Shard.object_key.in_(keys)))
+            seg_ids = select(Segment.id).where(Segment.file_id == file_id).scalar_subquery()
+            await s.execute(delete(Shard).where(Shard.segment_id.in_(seg_ids), Shard.provider_id.is_(None)))
             remaining = await s.scalar(
                 select(Shard.id).join(Segment).where(Segment.file_id == file_id).limit(1)
             )

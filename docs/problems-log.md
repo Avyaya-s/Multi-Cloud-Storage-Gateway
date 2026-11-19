@@ -87,11 +87,13 @@ what we learned. Add an entry whenever something breaks, surprises us, or forces
   buckets, and their shard rows stayed in the database.
 - Cause: those containers were stopped at the moment of the delete, so the background purge could not
   remove the objects.
-- Fix: rows are kept (same reasoning as P7); the garbage collector will retry. The dashboard counts
-  only shards of live files, so the leftovers do not inflate the cloud cards.
+- Fix: rows are kept (same reasoning as P7) and the garbage collector retries. On 2026-11-19 its
+  first real run deleted all 18 leftover objects (16 from the PDFs, 2 rows from `new.txt`) and
+  removed the 3 dead files in 0.2 s; each bucket was left with exactly the 6 shards of the one
+  live file.
 - Lesson: deletes in multi-cloud storage are not atomic; "delete" must be a retried process, not a
   single call.
-- Status: open (garbage collector)
+- Status: fixed (garbage collector)
 
 ## P9. A cloud that is down at gateway startup stays DOWN until restart  (dashboard testing, health)
 - Symptom: after starting a stopped MinIO container, the dashboard kept showing it as DOWN.
@@ -129,6 +131,30 @@ what we learned. Add an entry whenever something breaks, surprises us, or forces
   A 4th provider gives repairs somewhere else to go.
 - Open: a file deleted while a repair is mid-upload can leave one untracked object (the scrubber
   re-checks the file status before writing, which narrows but does not close the window).
+
+## P13. Rows with no provider kept dead files alive forever  (garbage collector, 2026-11-19)
+- Symptom: found while designing the GC. A rolled-back upload with nowhere to place some shards
+  (e.g. only 2 providers) left a FAILED file row that could never be removed.
+- Cause: shard rows with `provider_id = NULL` point at nothing, so no delete ever "confirms" them,
+  and `forget_shards` only removes the file once no shard rows remain.
+- Fix: `forget_shards` also drops provider-less rows. A test reproduces it; with the old code the
+  test fails, with the fix it passes (checked by temporarily restoring the old function).
+- Lesson: cleanup logic must handle every state a row can be in, including "never placed".
+- Status: fixed
+
+## P14. Garbage collection design decisions  (garbage collector, 2026-11-19)
+- Metadata rows are removed only AFTER the provider confirms the delete; a down provider keeps its
+  rows until a later run. Deleting a key that is already gone is not an error, so every run is safe
+  to repeat.
+- Stale uploads: a file still PENDING an hour after it started is treated as crashed and cleaned.
+  Risk: a genuinely slow upload. Guard: finishing an upload now only succeeds if the file is still
+  PENDING, so an abandoned upload is rolled back instead of resurrected.
+- The sweep (delete objects no row mentions) is the only step that can destroy data that metadata
+  does not know about, so it: lists the bucket BEFORE reading known keys (write-ahead means every
+  real object already has a row), ignores objects younger than 1 hour, runs only once a day, and
+  assumes each bucket belongs to this gateway alone. Two gateways with different databases on one
+  bucket would delete each other's data. Not run on the real data without asking.
+- This also closes P12's delete-during-repair window: any untracked object it leaves is swept.
 
 ## P10. Small tooling surprises  (Phases 1-2)
 - `python-dotenv` crashed (`AssertionError` in `find_dotenv`) when a script was fed through stdin:

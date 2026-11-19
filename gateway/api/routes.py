@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -33,6 +33,7 @@ from gateway.service import (
     unlock_kek,
 )
 from gateway.settings import REPO_ROOT, Settings
+from gateway.workers.gc import GarbageCollector, GcBusyError
 from gateway.workers.scrubber import Scrubber, ScrubBusyError
 
 log = logging.getLogger(__name__)
@@ -104,24 +105,41 @@ class ScrubOut(BaseModel):
     duration_s: float
 
 
-def _start_scheduler(scrubber: Scrubber, cfg: Settings) -> AsyncIOScheduler:
-    """Background scrubs; a run that overlaps another is skipped, not queued."""
+class GcOut(BaseModel):
+    sweep: bool
+    orphans_deleted: int
+    orphans_kept: int
+    stale_uploads: int
+    objects_deleted: int
+    objects_kept: int
+    files_removed: int
+    swept: int
+    sweep_skipped: list[str]
+    duration_s: float
+
+
+def _start_scheduler(scrubber: Scrubber, gc: GarbageCollector, cfg: Settings) -> AsyncIOScheduler:
+    """Background workers; a run that overlaps another of its kind is skipped, not queued."""
     scheduler = AsyncIOScheduler()
 
-    async def job(deep: bool) -> None:
+    async def job(name: str, run: Callable[[], Awaitable[object]]) -> None:
         try:
-            await scrubber.run(deep=deep)
-        except ScrubBusyError:
-            log.info("scheduled scrub skipped: another scrub is running")
+            await run()
+        except (ScrubBusyError, GcBusyError):
+            log.info("scheduled %s skipped: still running from last time", name)
         except Exception:
-            log.exception("scheduled scrub failed")
+            log.exception("scheduled %s failed", name)
 
-    for seconds, deep in ((cfg.scrub_interval_s, False), (cfg.deep_scrub_interval_s, True)):
+    jobs = [
+        ("scrub-quick", cfg.scrub_interval_s, lambda: scrubber.run(deep=False)),
+        ("scrub-deep", cfg.deep_scrub_interval_s, lambda: scrubber.run(deep=True)),
+        ("gc", cfg.gc_interval_s, lambda: gc.run(sweep=False)),
+        ("gc-sweep", cfg.sweep_interval_s, lambda: gc.run(sweep=True)),
+    ]
+    for name, seconds, run in jobs:
         if seconds > 0:
-            scheduler.add_job(
-                job, "interval", seconds=seconds, kwargs={"deep": deep},
-                id=f"scrub-{'deep' if deep else 'quick'}", max_instances=1, coalesce=True,
-            )
+            scheduler.add_job(job, "interval", seconds=seconds, args=[name, run], id=name,
+                              max_instances=1, coalesce=True)
     scheduler.start()
     return scheduler
 
@@ -146,7 +164,8 @@ def create_app(settings: Settings | None = None, registry: ProviderRegistry | No
         placer = Placer(reg)
         app.state.service = FileService(repo, reg, placer, kek)
         app.state.scrubber = Scrubber(repo, reg, placer)
-        scheduler = _start_scheduler(app.state.scrubber, cfg)
+        app.state.gc = GarbageCollector(repo, reg, placer)
+        scheduler = _start_scheduler(app.state.scrubber, app.state.gc, cfg)
         try:
             yield
         finally:
@@ -262,6 +281,18 @@ def create_app(settings: Settings | None = None, registry: ProviderRegistry | No
         except ScrubBusyError as err:
             raise HTTPException(status.HTTP_409_CONFLICT, str(err)) from err
         return ScrubOut(**asdict(report))
+
+    @app.post("/admin/gc", response_model=GcOut)
+    async def collect_garbage(sweep: bool = False) -> GcOut:
+        """Delete objects no live file needs: orphans, leftovers of failed uploads and deletes,
+        stale uploads. sweep=true also deletes untracked bucket objects older than an hour.
+        No authentication yet (JWT comes later): the API listens on 127.0.0.1 only.
+        """
+        try:
+            report = await app.state.gc.run(sweep=sweep)
+        except GcBusyError as err:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(err)) from err
+        return GcOut(**asdict(report))
 
     if DASHBOARD_DIST.is_dir():  # built with `npm run build` in dashboard/
         app.mount("/ui", StaticFiles(directory=DASHBOARD_DIST, html=True), name="ui")

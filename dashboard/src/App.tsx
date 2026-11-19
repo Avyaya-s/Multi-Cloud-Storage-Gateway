@@ -81,6 +81,24 @@ export default function App() {
     }
   };
 
+  const collect = async () => {
+    setScrubbing(true);
+    setScrubMsg(null);
+    try {
+      const r = await api.gc();
+      const kept = r.objects_kept + r.orphans_kept;
+      setScrubMsg(
+        `${r.objects_deleted + r.orphans_deleted} leftover objects deleted, ${r.files_removed} dead files removed` +
+          (kept ? `, ${kept} kept (cloud unreachable)` : ""),
+      );
+      refresh();
+    } catch (err) {
+      setScrubMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setScrubbing(false);
+    }
+  };
+
   usePoll(refresh, FAST_MS);
   usePoll(refreshProviders, PROVIDERS_MS);
 
@@ -110,6 +128,10 @@ export default function App() {
             <button type="button" className="ghost" disabled={scrubbing || !online} onClick={() => scrub(true)}
               title="Download and SHA-256 every shard; rebuild missing or corrupt ones">
               Deep scrub
+            </button>
+            <button type="button" className="ghost" disabled={scrubbing || !online} onClick={collect}
+              title="Delete leftovers of deleted/failed uploads and orphaned copies">
+              Collect garbage
             </button>
             {scrubMsg && <span className="scrub-result">{scrubMsg}</span>}
           </div>

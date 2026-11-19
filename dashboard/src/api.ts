@@ -62,6 +62,19 @@ export interface ScrubReport {
   duration_s: number;
 }
 
+export interface GcReport {
+  sweep: boolean;
+  orphans_deleted: number;
+  orphans_kept: number;
+  stale_uploads: number;
+  objects_deleted: number;
+  objects_kept: number;
+  files_removed: number;
+  swept: number;
+  sweep_skipped: string[];
+  duration_s: number;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -94,6 +107,12 @@ export const api = {
     const r = await fetch(`/admin/scrub?deep=${deep}`, { method: "POST" });
     if (!r.ok) throw new ApiError(r.status, await detail(r));
     return r.json() as Promise<ScrubReport>;
+  },
+
+  async gc(): Promise<GcReport> {
+    const r = await fetch("/admin/gc", { method: "POST" });
+    if (!r.ok) throw new ApiError(r.status, await detail(r));
+    return r.json() as Promise<GcReport>;
   },
 
   async remove(id: string): Promise<void> {

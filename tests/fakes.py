@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from gateway.providers.base import ProviderError, ShardNotFoundError, StorageProvider
+from datetime import UTC, datetime
+
+from gateway.providers.base import ObjectInfo, ProviderError, ShardNotFoundError, StorageProvider
 from gateway.providers.registry import ProviderConfig, ProviderRegistry
 
 
@@ -10,6 +12,7 @@ class MemoryProvider(StorageProvider):
     def __init__(self, name: str, jurisdiction: str = "IN") -> None:
         super().__init__(name, jurisdiction)
         self.blobs: dict[str, bytes] = {}
+        self.mtimes: dict[str, datetime] = {}
         self.down = False
         self.fail_next_puts = 0  # transient failures: the next N puts raise
         self.poison_first_key = False  # every put of the first key seen fails (one dead shard)
@@ -31,6 +34,11 @@ class MemoryProvider(StorageProvider):
             self.fail_next_puts -= 1
             raise ProviderError(f"{self.name}: transient")
         self.blobs[key] = data
+        self.mtimes[key] = datetime.now(UTC)
+
+    async def list_objects(self) -> list[ObjectInfo]:
+        self._check()
+        return [ObjectInfo(k, self.mtimes.get(k, datetime.now(UTC))) for k in self.blobs]
 
     async def get(self, key: str) -> bytes:
         self.get_calls += 1
@@ -46,6 +54,7 @@ class MemoryProvider(StorageProvider):
     async def delete(self, key: str) -> None:
         self._check()
         self.blobs.pop(key, None)
+        self.mtimes.pop(key, None)
 
     async def probe(self) -> float:
         self._check()

@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
+
+
+@dataclass(frozen=True)
+class ObjectInfo:
+    key: str
+    last_modified: datetime  # timezone-aware
 
 
 class ProviderError(Exception):
@@ -43,6 +51,10 @@ class StorageProvider(ABC):
     @abstractmethod
     async def probe(self) -> float:
         """Round-trip latency in milliseconds; raise ProviderError if unreachable."""
+
+    async def list_objects(self) -> list[ObjectInfo]:
+        """Every object in this provider's bucket (used by the garbage collector's sweep)."""
+        raise NotImplementedError(f"{type(self).__name__} cannot list objects")
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(name={self.name!r}, jurisdiction={self.jurisdiction!r})"

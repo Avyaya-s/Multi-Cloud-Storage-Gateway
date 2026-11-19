@@ -35,6 +35,14 @@ export function EventsFeed({ events, fileNames }: Props) {
           (d.reason ? ` (${d.reason})` : ` (${d.readable} readable shards, need ${d.need})`);
       case "FILE_HEALED":
         return `${name(d.file_id)} is back to 6/6 shards (ACTIVE)`;
+      case "GC":
+        return `Garbage collection: ${d.objects_deleted} leftover objects and ${d.orphans_deleted} orphans ` +
+          `deleted, ${d.files_removed} dead files removed` +
+          (Number(d.objects_kept) + Number(d.orphans_kept)
+            ? `, ${Number(d.objects_kept) + Number(d.orphans_kept)} kept (cloud unreachable)` : "") +
+          (d.sweep ? `, ${d.swept} untracked swept` : "") + ` (${d.duration_s}s)`;
+      case "STALE_UPLOAD":
+        return `${name(d.file_id)}: upload never finished; given up and cleaned`;
       case "SCRUB":
         return `${d.deep ? "Deep" : "Quick"} scrub: ${d.files} files, ${d.shards_checked} shards checked, ` +
           `${d.missing_found} missing, ${d.corrupt_found} corrupt, ${d.repaired} repaired` +

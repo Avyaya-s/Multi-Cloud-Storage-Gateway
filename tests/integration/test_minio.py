@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from datetime import timedelta
 
 import pytest
 
@@ -110,10 +111,38 @@ async def test_d_scrubber_rebuilds_a_cloud_that_lost_everything(gateway) -> None
     assert report["missing_found"] == 6 and report["repaired"] == 6 and report["unrepaired"] == 0
 
     # Prove the rebuilt shards are real: lose a DIFFERENT cloud, so the download needs them.
+    await _download_with_in1_stopped(client, meta["id"], data)
+
+
+async def _download_with_in1_stopped(client, file_id: str, data: bytes) -> None:
     compose("stop", "minio-in-1")
     try:
-        r = await client.get(f"/files/{meta['id']}/download")
+        r = await client.get(f"/files/{file_id}/download")
         assert r.status_code == 200 and r.content == data
     finally:
         compose("start", "minio-in-1")
         await wait_ready("minio-in-1")
+
+
+async def test_e_gc_finishes_a_delete_that_hit_a_down_cloud_and_sweeps(gateway) -> None:
+    client, registry = await gateway(THREE)
+    meta = (await client.post("/files", files={"file": ("d.bin", os.urandom(5 * MIB))})).json()
+
+    compose("stop", "minio-abroad")
+    try:
+        assert (await client.delete(f"/files/{meta['id']}")).status_code == 202
+    finally:
+        compose("start", "minio-abroad")
+        await wait_ready("minio-abroad")
+    abroad = registry["minio-abroad"]
+    assert len(await abroad.list_objects()) == 4  # the purge could not reach it: 2 segments x 2
+
+    # A stray object no metadata knows about (e.g. left by a crash).
+    await abroad.put("stray-object", b"nobody owns me")
+    gc = client._transport.app.state.gc  # type: ignore[attr-defined]
+    gc.sweep_min_age = timedelta(0)  # the default 1 h grace would (rightly) spare it
+
+    report = (await client.post("/admin/gc", params={"sweep": "true"})).json()
+    assert report["objects_deleted"] == 4 and report["files_removed"] == 1 and report["swept"] == 1
+    for name in THREE:
+        assert await registry[name].list_objects() == []  # every bucket empty again

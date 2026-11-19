@@ -114,7 +114,9 @@ class FileService:
             raise UploadFailedError("upload failed; rolled back") from err
 
         status = FileStatus.DEGRADED if state.degraded else FileStatus.ACTIVE
-        await self.repo.finalize_file(ctx.file_id, status, state.size, state.segments, mac.finalize().hex())
+        if not await self.repo.finalize_file(ctx.file_id, status, state.size, state.segments, mac.finalize().hex()):
+            await self._rollback(ctx.file_id, reason="no longer pending")
+            raise UploadFailedError("upload took too long and was abandoned; rolled back")
         if status is FileStatus.DEGRADED:
             await self.repo.add_event("REPAIR_QUEUED", {"file_id": str(ctx.file_id)})
         await self.repo.add_event("UPLOAD", {"file_id": str(ctx.file_id), "status": status.value})

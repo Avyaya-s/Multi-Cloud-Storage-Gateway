@@ -10,7 +10,7 @@ import aioboto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-from gateway.providers.base import ProviderError, ShardNotFoundError, StorageProvider
+from gateway.providers.base import ObjectInfo, ProviderError, ShardNotFoundError, StorageProvider
 
 _NOT_FOUND = {"404", "NoSuchKey", "NotFound", "NoSuchBucket"}
 
@@ -122,6 +122,17 @@ class S3CompatProvider(StorageProvider):
             await self._require_client().delete_object(Bucket=self.bucket, Key=key)
         except (ClientError, BotoCoreError) as err:
             raise ProviderError(f"{self.name}: delete failed") from err
+
+    async def list_objects(self) -> list[ObjectInfo]:
+        try:
+            paginator = self._require_client().get_paginator("list_objects_v2")
+            return [
+                ObjectInfo(obj["Key"], obj["LastModified"])
+                async for page in paginator.paginate(Bucket=self.bucket)
+                for obj in page.get("Contents", [])
+            ]
+        except (ClientError, BotoCoreError) as err:
+            raise ProviderError(f"{self.name}: list failed") from err
 
     async def probe(self) -> float:
         start = time.perf_counter()

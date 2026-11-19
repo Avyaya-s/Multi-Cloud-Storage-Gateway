@@ -65,6 +65,12 @@ bench/
   Before re-pointing a shard row elsewhere, the old location is written to `orphans` (for the GC).
   DEGRADED -> ACTIVE when every shard is STORED again. Runs on APScheduler (SCRUB_INTERVAL_S,
   DEEP_SCRUB_INTERVAL_S) and via POST /admin/scrub?deep=.
+- Garbage collector (gateway/workers/gc.py): deletes `orphans`, shards of FAILED/DELETED
+  files, and uploads still PENDING after 1 h (marked FAILED; finalize_file only succeeds while
+  PENDING, so they are never resurrected). Rows are removed only after the provider confirms.
+  Opt-in sweep deletes bucket objects no row/orphan mentions, older than 1 h (list first, then
+  read known keys); assumes one gateway per bucket. GC_INTERVAL_S, SWEEP_INTERVAL_S,
+  POST /admin/gc?sweep=.
 - Hedged reads are NOT core: optional setting HEDGED_READS (default false), added later
   for benchmarking.
 - Extension (only after core works): residency policies (india_only,
